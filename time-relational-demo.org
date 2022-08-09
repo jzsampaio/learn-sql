@@ -1,0 +1,309 @@
+#+TITLE: Demo of Time Relational Theory on Postgresql
+#+PROPERTY: header-args:sql    :engine "postgresql" :dbhost "127.0.0.1" :dbport 5432 :dbuser "jz" :dbpassword "Foobar123" :database "timerelational"
+
+On this file I investigate how to implement on Postgresql the examples
+from the book "Time Relational Theory". More precisely, I implement
+the queries on chapter 9, which use the operators Pack and Unpack.
+
+* Creating Schema + Seeding Data for Demo
+** Create database
+
+Run the following commands as user ~postgres~. You can ~sudo su
+postgres~, then ~psql~, then run the commands below.
+
+#+begin_src sql
+create database timerelational;
+create user jz with encrypted password 'Foobar123';
+grant all privileges on database timerelational to jz;
+#+end_src
+
+** S_DURING
+
+#+begin_src sql
+CREATE TABLE S_DURING (
+       SNO char(2),
+       DURING int4range,
+       PRIMARY KEY (SNO, DURING)
+);
+#+end_src
+
+#+RESULTS:
+| CREATE TABLE |
+|--------------|
+
+*** Data Insertion
+
+#+begin_src sql
+	INSERT INTO S_DURING
+	VALUES
+	('S1', '[4, 10]'),
+	('S2', '[2, 4]'),
+	('S2', '[7, 10]'),
+	('S3', '[3, 10]'),
+	('S4', '[4, 10]'),
+	('S5', '[2, 10]');
+#+end_src
+
+#+RESULTS:
+| INSERT 0 6 |
+|------------|
+
+** SP_DURING
+
+#+begin_src sql
+CREATE TABLE SP_DURING (
+	SNO char(2),
+	PNO char(2),
+	DURING int4range,
+	PRIMARY KEY (SNO, PNO, DURING)
+);
+#+end_src
+
+#+RESULTS:
+| CREATE TABLE |
+|--------------|
+
+*** Data Seed
+
+#+begin_src sql
+INSERT INTO SP_DURING VALUES
+('S1', 'P1', '[4, 10]'),
+('S1', 'P2', '[5, 10]'),
+('S1', 'P3', '[9, 10]'),
+('S1', 'P4', '[5, 10]'),
+('S1', 'P5', '[4, 10]'),
+('S1', 'P6', '[6, 10]'),
+('S2', 'P1', '[2, 4]'),
+('S2', 'P1', '[8, 10]'),
+('S2', 'P2', '[3, 3]'),
+('S2', 'P2', '[9, 10]'),
+('S3', 'P2', '[8, 10]'),
+('S4', 'P2', '[6, 9]'),
+('S4', 'P4', '[4, 8]'),
+('S4', 'P5', '[5, 10]');
+
+#+end_src
+
+#+RESULTS:
+| INSERT 0 14 |
+|-------------|
+
+** Cleaning Up
+
+In case you need to reset the database during your experimentation,
+you can use the following scripts.
+
+*** Truncating
+
+#+begin_src sql
+	TRUNCATE TABLE S_DURING;
+	TRUNCATE TABLE SP_DURING;
+#+end_src
+
+#+RESULTS:
+| TRUNCATE TABLE |
+|----------------|
+
+
+*** Dropping
+#+begin_src sql
+	DROP TABLE S_DURING;
+	DROP TABLE SP_DURING;
+#+end_src
+
+#+RESULTS:
+| DROP TABLE |
+|------------|
+* Queries
+** Preliminary Research
+*** Group
+
+The group operator should produce a relation value in which one of the
+columns if of a relation type.
+
+#+begin_src sql
+	SELECT
+	SNO,
+	array_agg(DURING)
+	FROM S_DURING
+	GROUP BY SNO;
+#+end_src
+
+#+RESULTS:
+| sno | array_agg          |
+|-----+--------------------|
+| S1  | {"[4,11)"}         |
+| S5  | {"[2,11)"}         |
+| S2  | {"[2,5)","[7,11)"} |
+| S4  | {"[4,11)"}         |
+| S3  | {"[3,11)"}         |
+
+*** Ungroup
+
+#+begin_src sql
+WITH
+T1 AS (
+	SELECT
+	SNO,
+	array_agg(DURING) AS X
+	FROM S_DURING
+	GROUP BY SNO
+)
+SELECT
+	SNO,
+	UNNEST(X)
+	FROM T1;
+#+end_src
+
+#+RESULTS:
+| sno | unnest |
+|-----+--------|
+| S1  | [4,11) |
+| S5  | [2,11) |
+| S2  | [2,5)  |
+| S2  | [7,11) |
+| S4  | [4,11) |
+| S3  | [3,11) |
+
+*** Expand (and/or Unpack)
+
+Note: Even if I insert ~[a,b]~, PG turns that into ~[a,b+1)~, so that
+~upper(i)~ returns i+1. Thus I must subtract 1 when generating the
+series.
+
+#+begin_src sql
+	WITH T1 AS (
+	SELECT
+	SNO,
+	generate_series(lower(DURING), upper(DURING) - 1) as T
+	FROM S_during )
+	SELECT SNO, int4range(T, T, '[]') FROM T1;
+#+end_src
+
+#+RESULTS:
+| sno | int4range |
+|-----+-----------|
+| S1  | [4,5)     |
+| S1  | [5,6)     |
+| S1  | [6,7)     |
+| S1  | [7,8)     |
+| S1  | [8,9)     |
+| S1  | [9,10)    |
+| S1  | [10,11)   |
+| S2  | [2,3)     |
+| S2  | [3,4)     |
+| S2  | [4,5)     |
+| S2  | [7,8)     |
+| S2  | [8,9)     |
+| S2  | [9,10)    |
+| S2  | [10,11)   |
+| S3  | [3,4)     |
+| S3  | [4,5)     |
+| S3  | [5,6)     |
+| S3  | [6,7)     |
+| S3  | [7,8)     |
+| S3  | [8,9)     |
+| S3  | [9,10)    |
+| S3  | [10,11)   |
+| S4  | [4,5)     |
+| S4  | [5,6)     |
+| S4  | [6,7)     |
+| S4  | [7,8)     |
+| S4  | [8,9)     |
+| S4  | [9,10)    |
+| S4  | [10,11)   |
+| S5  | [2,3)     |
+| S5  | [3,4)     |
+| S5  | [4,5)     |
+| S5  | [5,6)     |
+| S5  | [6,7)     |
+| S5  | [7,8)     |
+| S5  | [8,9)     |
+| S5  | [9,10)    |
+| S5  | [10,11)   |
+
+*** Collapse (and/or Pack)
+
+#+begin_src sql
+	WITH T1 AS (
+	SELECT
+	SNO,
+	generate_series(lower(DURING), upper(DURING) - 1) as T
+	FROM S_during ) ,
+	T2 AS (SELECT SNO, int4range(T, T, '[]') as T FROM T1)
+	SELECT SNO, range_agg(T) FROM T2 GROUP BY SNO;
+#+end_src
+
+#+RESULTS:
+| sno | range_agg      |
+|-----+----------------|
+| S1  | {[4,11)}       |
+| S5  | {[2,11)}       |
+| S2  | {[2,5),[7,11)} |
+| S4  | {[4,11)}       |
+| S3  | {[3,11)}       |
+
+
+Note: the own construction of multi-range already collapse intervals
+that can be merged.
+
+#+begin_src sql
+	select '{[2,5], [3,7], [10,20]}'::int4multirange;
+#+end_src
+
+#+RESULTS:
+| int4multirange  |
+|-----------------|
+| {[2,8),[10,21)} |
+
+** Query A
+
+*Problem Definition*
+
+Get SNO-DURING pairs such that DURING designates a maximal interval
+during which supplier SNO was able to supply at least one part.
+
+*Query*
+
+#+begin_src sql
+	SELECT SNO, unnest(range_agg(DURING)) FROM SP_DURING GROUP BY
+	SNO ORDER BY SNO;
+#+end_src
+
+#+RESULTS:
+| sno | unnest |
+|-----+--------|
+| S1  | [4,11) |
+| S2  | [2,5)  |
+| S2  | [8,11) |
+| S3  | [8,11) |
+| S4  | [4,11) |
+
+** Query B
+
+*Problem Definition*
+
+Get SNO-DURING pairs such that DURING designates a maximal interval
+during which supplier SNO was unable to supply any parts at all.
+
+*Query*
+
+#+begin_src sql
+	WITH T1 AS (
+	SELECT SNO, GENERATE_series(lower(DURING), upper(during) - 1) AS D FROM S_DURING
+	),
+	T2 AS (
+	SELECT SNO, GENERATE_SERIES(lower(DURING), upper(DURING)) as D from SP_DURING
+	),
+	T3 AS (SELECT SNO, int4range(D, D, '[]') as D FROM T1 WHERE NOT EXISTS(SELECT * FROM T2 WHERE T2.SNO = T1.SNO AND T2.D = T1.D))
+	Select SNO, range_agg(D) from T3 GROUP BY SNO;
+#+end_src
+
+#+RESULTS:
+| sno | range_agg |
+|-----+-----------|
+| S2  | {[7,8)}   |
+| S3  | {[3,8)}   |
+| S5  | {[2,11)}  |
+
+Note: is the a better way of implementing the MINUS operator?
