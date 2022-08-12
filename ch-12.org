@@ -1,0 +1,282 @@
+#+TITLE: Demo of Ch12: Database Structure
+#+PROPERTY: header-args:sql    :engine "postgresql" :dbhost "127.0.0.1" :dbport 5432 :dbuser "jz" :dbpassword "Foobar123" :database "timerelational"
+
+On this file a try a demo of the concepts presented on chapter 12 of
+"Time and Relational Theory". The book recommends a mixture of ~since~
+and ~during~ tables. Both horizontal and vertical decomposition are to
+be used. The ~since~ table contains current values, and ~during~ table
+contains the historical values.
+
+* Model and Domain
+
+To create my example, I will use the domain of strength training
+workout programs.
+
+I will simplify things a bit.
+
+The entities are:
+
+- Trainee: has a first and last name, is identified by his cpf, and
+  has a goal to achieve at the gym
+
+* A v0 Schema
+** Create database
+
+Run the following commands as user ~postgres~. You can ~sudo su
+postgres~, then ~psql~, then run the commands below.
+
+#+begin_src sql
+create database timerelational;
+create user jz with encrypted password 'Foobar123';
+grant all privileges on database timerelational to jz;
+#+end_src
+
+** Initial Schema
+
+#+begin_src sql
+CREATE TABLE v0Trainee (
+       FirstName varchar,
+       Cpf char(11),
+       Goal varchar,
+       PRIMARY KEY (Cpf)
+);
+#+end_src
+
+#+RESULTS:
+| CREATE TABLE |
+|--------------|
+
+** Seed initial data
+
+#+begin_src sql
+	INSERT INTO v0Trainee(FirstName, Cpf, Goal)
+	VALUES
+	('Juarez', '03769155106', 'Get stronger and harder to kill'),
+	('Luana', '01234567891', 'Get in shape');
+#+end_src
+
+#+RESULTS:
+| INSERT 0 2 |
+|------------|
+
+** Update
+
+#+begin_src sql
+	UPDATE v0Trainee
+	SET
+	Goal = 'Maintaing current level of strength'
+	WHERE Cpf = '03769155106'
+#+end_src
+
+#+RESULTS:
+| UPDATE 1 |
+|----------|
+
+** View data
+
+#+begin_src sql
+	SELECT * FROM v0Trainee;
+#+end_src
+
+#+RESULTS:
+| firstname |         cpf | goal                                |
+|-----------+-------------+-------------------------------------|
+| Luana     | 01234567891 | Get in shape                        |
+| Juarez    | 03769155106 | Maintaing current level of strength |
+
+* A v1 Schema
+** Create Schema
+
+#+begin_src sql
+DROP TABLE IF EXISTS v1TraineeSince;
+DROP TABLE IF EXISTS v1TraineeFirstNameDuring;
+DROP TABLE IF EXISTS v1TraineeGoalDuring;
+DROP TABLE IF EXISTS v1TraineeCpfDuring;
+
+CREATE TABLE v1TraineeSince (
+       Cpf char(11),
+       CpfSince date,
+       FirstName varchar,
+       FirstNameSince date,
+       Goal varchar,
+       GoalSince date,
+       PRIMARY KEY (Cpf)
+);
+
+CREATE TABLE v1TraineeCpfDuring (
+       Cpf char(11),
+       During daterange,
+       PRIMARY KEY (Cpf, During)
+       -- ?? CONSTRAINT fk_1 FOREIGN KEY (Cpf) REFERENCES
+);
+
+CREATE TABLE v1TraineeFirstNameDuring (
+       Cpf char(11),
+       FirstName varchar,
+       During daterange,
+       Primary Key (Cpf, During)
+);
+
+CREATE TABLE v1TraineeGoalDuring (
+       Cpf char(11),
+       Goal varchar,
+       During daterange,
+       Primary Key (Cpf, During)
+);
+#+end_src
+
+#+RESULTS:
+| DROP TABLE   |
+|--------------|
+| DROP TABLE   |
+| DROP TABLE   |
+| DROP TABLE   |
+| CREATE TABLE |
+| CREATE TABLE |
+| CREATE TABLE |
+| CREATE TABLE |
+
+** Seed Initial Data
+
+#+begin_src sql
+Truncate table v1TraineeSince;
+Truncate table v1TraineeCpfDuring;
+Truncate table v1TraineeGoalDuring;
+Truncate table v1TraineeFirstNameDuring;
+
+INSERT INTO v1TraineeSince
+VALUES
+	('03769155106', '2020-01-01', 'Juarez', '2020-01-01', 'Get stronger and harder to kill', '2020-01-01'),
+	('01234567891', '2022-07-11', 'Luana', '2022-07-11', 'Get in shape', '2022-07-11');
+#+end_src
+
+#+RESULTS:
+| TRUNCATE TABLE |
+|----------------|
+| TRUNCATE TABLE |
+| TRUNCATE TABLE |
+| TRUNCATE TABLE |
+| INSERT 0 2     |
+
+** Update existing row
+
+On August 2022, Juarez decided he would rather prioritize BJJ, and be
+realistic on his goals with strength training.
+
+We update the since-table and log the old value on the corresponding
+during-table.
+
+#+begin_src sql
+UPDATE v1TraineeSince
+       SET Goal = 'Maintain current strength level', GoalSince = '2022-08-01'
+       WHERE Cpf = '03769155106';
+
+INSERT INTO v1TraineeGoalDuring(Cpf, Goal, During)
+VALUES
+	('03769155106', 'Get stronger and harder to kill', '[2020-01-01, 2022-08-01)');
+;
+#+end_src
+
+#+RESULTS:
+| UPDATE 1   |
+|------------|
+| INSERT 0 1 |
+
+** Visualize data
+
+#+begin_src sql
+	SELECT * from v1TraineeSince;
+#+end_src
+
+#+RESULTS:
+|         cpf |   cpfsince | firstname | firstnamesince | goal                            |  goalsince |
+|-------------+------------+-----------+----------------+---------------------------------+------------|
+| 01234567891 | 2022-07-11 | Luana     |     2022-07-11 | Get in shape                    | 2022-07-11 |
+| 03769155106 | 2020-01-01 | Juarez    |     2020-01-01 | Maintain current strength level | 2022-08-01 |
+
+#+begin_src sql
+	SELECT * from v1TraineeGoalDuring;
+#+end_src
+
+#+RESULTS:
+|         cpf | goal                            | during                  |
+|-------------+---------------------------------+-------------------------|
+| 03769155106 | Get stronger and harder to kill | [2020-01-01,2022-08-01) |
+
+** Delete existing data
+
+On August 2022, unfortunately, Luana quit her strength training
+career.
+
+We remove her entry from the since-table, and we log all values to the
+during tables.
+
+#+begin_src sql
+
+	INSERT INTO
+	v1TraineeCpfDuring
+	VALUES ('01234567891', '[2022-07-11, 2022-08-01)')
+	ON CONFLICT DO NOTHING;
+
+	INSERT INTO
+	v1TraineeGoalDuring
+	VALUES ('01234567891', 'Get in shape', '[2022-07-11, 2022-08-01)')
+	ON CONFLICT DO NOTHING;
+
+	INSERT INTO
+	v1TraineeFirstNameDuring
+	VALUES ('01234567891', 'Luana', '[2022-07-11, 2022-08-01)')
+	ON CONFLICT DO NOTHING;
+
+	DELETE FROM v1TraineeSince WHERE Cpf = '01234567891';
+	#+end_src
+
+        #+RESULTS:
+        | INSERT 0 0 |
+        |------------|
+        | INSERT 0 0 |
+        | INSERT 0 1 |
+        | DELETE 1   |
+** Visualize data
+
+#+begin_src sql
+	SELECT * from v1TraineeSince;
+#+end_src
+
+#+RESULTS:
+|         cpf |   cpfsince | firstname | firstnamesince | goal                            |  goalsince |
+|-------------+------------+-----------+----------------+---------------------------------+------------|
+| 03769155106 | 2020-01-01 | Juarez    |     2020-01-01 | Maintain current strength level | 2022-08-01 |
+
+#+begin_src sql
+	SELECT * from v1TraineeCpfDuring;
+#+end_src
+
+#+RESULTS:
+|         cpf | during                  |
+|-------------+-------------------------|
+| 01234567891 | [2022-07-11,2022-08-01) |
+
+#+begin_src sql
+	SELECT * from v1TraineeGoalDuring;
+#+end_src
+
+#+RESULTS:
+|         cpf | goal                            | during                  |
+|-------------+---------------------------------+-------------------------|
+| 03769155106 | Get stronger and harder to kill | [2020-01-01,2022-08-01) |
+| 01234567891 | Get in shape                    | [2022-07-11,2022-08-01) |
+
+
+#+begin_src sql
+	SELECT * from v1TraineeFirstNameDuring;
+#+end_src
+
+#+RESULTS:
+|         cpf | firstname | during                  |
+|-------------+-----------+-------------------------|
+| 01234567891 | Luana     | [2022-07-11,2022-08-01) |
+
+* Questions
+
+** On v1, where are FK constraints put?
