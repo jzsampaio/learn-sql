@@ -20,6 +20,9 @@ The entities are:
   has a goal to achieve at the gym
 
 * A v0 Schema
+
+On this v0 I implement the obvious and normie thing to do.
+
 ** Create database
 
 Run the following commands as user ~postgres~. You can ~sudo su
@@ -85,6 +88,16 @@ CREATE TABLE v0Trainee (
 | Juarez    | 03769155106 | Maintaing current level of strength |
 
 * A v1 Schema
+
+On this v1 I implement the recommendations from Time and Relational
+Theory.
+
+The ~since~ table contains current values with a ~since~ field for
+each non-since attribute. There is one ~during~ table for each of the
+attributes, and these tables record the historical values. The moving
+point ~NOW~ is never written to the database, nor we use the infinite
+value, nor null.
+
 ** Create Schema
 
 #+begin_src sql
